@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "rootDir": "./src",
+    "outDir": "./build",
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "moduleResolution": "node16",
+    "module": "Node16",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "build"]
+}
