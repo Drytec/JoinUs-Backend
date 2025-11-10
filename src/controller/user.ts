@@ -1,8 +1,8 @@
 import { Request, Response } from "express";
 import { UserService } from "../services/user";
 import { AuthService } from "../services/auth";
-import { error } from "console";
 import bcrypt from "bcrypt";
+import { PasswordResetService } from "../services/passwordReset";
 
 export class UserController {
   static async getAllUsers(req: Request, res: Response) {
@@ -169,6 +169,51 @@ export class UserController {
       return res.status(200).json({ message: "Usuario eliminado" });
     } catch (error) {
       return res.status(500).json({ error: "Error al eliminar usuario" });
+    }
+  }
+
+  /**
+   * Maneja la solicitud de restablecimiento sin revelar si el correo existe.
+   */
+  static async forgotPassword(req: Request, res: Response) {
+    const { email } = req.body;
+
+    if (typeof email !== "string" || email.trim().length === 0) {
+      return res.status(400).json({ error: "Email inválido" });
+    }
+
+    try {
+      await PasswordResetService.requestPasswordReset(email);
+      return res.status(200).json({ message: "Si el correo existe, recibirás instrucciones en breve" });
+    } catch (error: any) {
+      return res.status(500).json({ error: error.message ?? "Error al procesar la solicitud" });
+    }
+  }
+
+  /**
+   * Permite definir una nueva contraseña a partir de un token válido.
+   */
+  static async resetPassword(req: Request, res: Response) {
+    const { token, password } = req.body;
+
+    if (typeof token !== "string" || token.trim().length === 0) {
+      return res.status(400).json({ error: "Token inválido" });
+    }
+
+    if (typeof password !== "string" || password.trim().length === 0) {
+      return res.status(400).json({ error: "Contraseña inválida" });
+    }
+
+    try {
+      await PasswordResetService.resetPassword(token, password);
+      return res.status(200).json({ message: "Contraseña actualizada correctamente" });
+    } catch (error: any) {
+      const message: string = error?.message ?? "Error al restablecer la contraseña";
+      const isClientError =
+        message.includes("Token") ||
+        message.includes("contraseña");
+
+      return res.status(isClientError ? 400 : 500).json({ error: message });
     }
   }
 }
