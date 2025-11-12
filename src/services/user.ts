@@ -1,68 +1,50 @@
 import { db } from "../database/config";
-import {
-  collection,
-  getDocs,
-  getDoc,
-  doc,
-  addDoc,
-  updateDoc,
-  deleteDoc
-} from "firebase/firestore";
-import {  query, where, } from "firebase/firestore";
 import { User } from "../models/user";
 
-const usersCollection = collection(db, "users");
+const usersCollection = db.collection("users");
 
 export class UserService {
   static async getAll(): Promise<User[]> {
-    const snapshot = await getDocs(usersCollection);
+    const snapshot = await usersCollection.get();
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as User[];
   }
 
-   static async getUserById(id: string): Promise<User | null> {
-    const ref = doc(db, "users", id);
-    const snap = await getDoc(ref);
+  static async getUserById(id: string): Promise<User | null> {
+    const docRef = usersCollection.doc(id);
+    const snap = await docRef.get();
 
-    return snap.exists() ? ({ id: snap.id, ...snap.data() } as User) : null;
+    return snap.exists ? ({ id: snap.id, ...snap.data() } as User) : null;
   }
 
-    static async getUserByEmail(email: string): Promise<User | null> {
-    const q = query(usersCollection,where("email", "==", email));
-    const snapshot = await getDocs(q);
+  static async getUserByEmail(email: string): Promise<User | null> {
+    const snapshot = await usersCollection.where("email", "==", email).get();
 
     if (snapshot.empty) return null;
 
-
     const userDoc = snapshot.docs[0];
-    const { password, ...userData } = userDoc.data(); 
+    const { password, ...userData } = userDoc.data();
     return { id: userDoc.id, ...userData } as User;
   }
-    static async getUserByEmailP(email: string): Promise<User | null> {
-    const q = query(usersCollection,where("email", "==", email));
-    const snapshot = await getDocs(q);
+
+  static async getUserByEmailP(email: string): Promise<User | null> {
+    const snapshot = await usersCollection.where("email", "==", email).get();
 
     if (snapshot.empty) return null;
 
-
     const userDoc = snapshot.docs[0];
-    const { ...userData } = userDoc.data(); 
-    return { id: userDoc.id, ...userData } as User;
+    return { id: userDoc.id, ...userDoc.data() } as User;
   }
-  
-  
 
   static async createUser(user: User): Promise<string> {
-    const docRef = await addDoc(usersCollection, user);
+    const docRef = await usersCollection.add(user);
     return docRef.id;
   }
 
   static async updateUser(id: string, data: Partial<User>): Promise<void> {
-    const ref = doc(db, "users", id);
-    await updateDoc(ref, data);
+    await usersCollection.doc(id).update(data);
   }
 
   static async deleteUser(id: string): Promise<void> {
-    const ref = doc(db, "users", id);
-    await deleteDoc(ref);
+    await usersCollection.doc(id).delete();
   }
 }
