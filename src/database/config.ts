@@ -28,3 +28,4 @@ initializeFirebase();
 
 // Export Firestore instance
 export const db = admin.firestore();
+export { admin };

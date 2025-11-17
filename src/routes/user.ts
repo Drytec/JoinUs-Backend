@@ -11,5 +11,9 @@ router.put("/update",UserController.updateUser);
 
 router.delete("/delete",UserController.deleteUser);
 
+router.post("/userExist",UserController.registerWithProvider);
+
+router.post("/registerProvider",UserController.completeRegistration);
+
 
 export default router;

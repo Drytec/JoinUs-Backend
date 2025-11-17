@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { UserService } from "../services/user";
 import { AuthService } from "../services/auth";
+import  {admin}  from "../database/config";
 import bcrypt from "bcrypt";
 
 export class UserController {
@@ -77,7 +78,56 @@ export class UserController {
     }
   }
 
-  
+  static async registerWithProvider(req: Request, res: Response) {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({ error: "Token no recibido" });
+    }
+
+    const decoded = await admin.auth().verifyIdToken(token);
+
+    const uid = decoded.uid;
+    const email = decoded.email;
+    const name = decoded.name || decoded.displayName;
+    const picture = decoded.picture || decoded.photoURL;
+    
+    const userExists = await UserService.getUserByEmail(email);
+    console.log("EMAIL EN GETUSERBYEMAIL:", email);
+
+    if (userExists) {
+      return res.status(200).json({ exists: true, user: userExists });
+    }
+
+    return res.status(200).json({ exists: false, googleData: { uid, email, name, picture } });
+
+  } catch (err: any) {
+    console.log(err)
+    return res.status(500).json({ error: err.message });
+  }
+}
+static async completeRegistration(req: Request, res: Response) {
+  try {
+    const decoded = req.body;
+    const { firstName, lastName, age } = req.body;
+
+    const userExists = await UserService.getUserByEmail(decoded.email);
+    if (userExists) return res.status(400).json({ error: "El usuario ya está registrado" });
+
+    const newUser = await UserService.createUser({
+      email: decoded.email,
+      firstName,
+      lastName,
+      age,
+    });
+    return res.status(201).json({ message: "Registro completado", user: newUser });
+
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+}
+
   static async updateUser(req: Request, res: Response) {
     try {
       await UserService.updateUser(req.params.id, req.body);
