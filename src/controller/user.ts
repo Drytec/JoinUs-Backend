@@ -1,9 +1,10 @@
 import { Request, Response } from "express";
 import { UserService } from "../services/user";
 import { AuthService } from "../services/auth";
-import  {admin}  from "../database/config";
+import { admin, db } from "../database/config";
 import bcrypt from "bcrypt";
-import { PasswordResetService } from "../services/passwordReset";
+import crypto from "crypto";
+import { sendPasswordResetEmail } from "../services/passwordReset";
 
 export class UserController {
   static async getAllUsers(req: Request, res: Response) {
@@ -159,8 +160,42 @@ static async completeRegistration(req: Request, res: Response) {
       return res.status(400).json({ error: "Email inválido" });
     }
 
+  const normalizedEmail = email.trim().toLowerCase();
+
     try {
-      await PasswordResetService.requestPasswordReset(email);
+      const user = await UserService.getUserByEmailP(normalizedEmail);
+
+      if (!user || !user.id) {
+        return res.status(200).json({ message: "Si el correo existe, recibirás instrucciones en breve" });
+      }
+
+      const tokensCollection = db.collection("password_reset_tokens");
+      const existingTokens = await tokensCollection.where("email", "==", normalizedEmail).get();
+
+      for (const docSnapshot of existingTokens.docs) {
+        await docSnapshot.ref.delete();
+      }
+
+      const token = crypto.randomBytes(32).toString("hex");
+      const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+      const tokenRef = tokensCollection.doc(tokenHash);
+      const expiresAt = admin.firestore.Timestamp.fromMillis(Date.now() + 60 * 60 * 1000);
+
+      await tokenRef.set({
+        email: normalizedEmail,
+        userId: user.id,
+        uid: (user as unknown as { uid?: string }).uid ?? null,
+        expiresAt,
+        createdAt: admin.firestore.Timestamp.now(),
+      });
+
+      const emailResult = await sendPasswordResetEmail(normalizedEmail, token);
+
+      if (!emailResult.success) {
+        await tokenRef.delete();
+        throw new Error(emailResult.error ?? "No se pudo enviar el correo de recuperación");
+      }
+
       return res.status(200).json({ message: "Si el correo existe, recibirás instrucciones en breve" });
     } catch (error: any) {
       return res.status(500).json({ error: error.message ?? "Error al procesar la solicitud" });
@@ -181,14 +216,66 @@ static async completeRegistration(req: Request, res: Response) {
       return res.status(400).json({ error: "Contraseña inválida" });
     }
 
+    const normalizedToken = token.trim();
+    const newPassword = password.trim();
+
     try {
-      await PasswordResetService.resetPassword(token, password);
+      const tokensCollection = db.collection("password_reset_tokens");
+      const tokenHash = crypto.createHash("sha256").update(normalizedToken).digest("hex");
+      const tokenRef = tokensCollection.doc(tokenHash);
+      const tokenSnapshot = await tokenRef.get();
+
+      if (!tokenSnapshot.exists) {
+        return res.status(400).json({ error: "Token inválido o expirado" });
+      }
+
+      const data = tokenSnapshot.data() as
+        | {
+            email: string;
+            userId: string;
+            uid?: string | null;
+            expiresAt: admin.firestore.Timestamp;
+          }
+        | undefined;
+
+      if (!data) {
+        await tokenRef.delete();
+        return res.status(400).json({ error: "Token inválido" });
+      }
+
+      if (data.expiresAt.toMillis() < Date.now()) {
+        await tokenRef.delete();
+        return res.status(400).json({ error: "Token expirado" });
+      }
+
+      if (newPassword.length < 8) {
+        return res.status(400).json({ error: "La contraseña debe tener al menos 8 caracteres" });
+      }
+
+      if (!/(?=.*[a-zA-Z])(?=.*\d)/.test(newPassword)) {
+        return res.status(400).json({ error: "La contraseña debe contener al menos una letra y un número" });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await UserService.updateUser(data.userId, { password: hashedPassword });
+
+      try {
+        const userUid = data.uid ?? (await admin.auth().getUserByEmail(data.email)).uid;
+        await admin.auth().updateUser(userUid, { password: newPassword });
+      } catch (authError) {
+        console.error("No se pudo actualizar la contraseña en Firebase Auth:", authError);
+        throw new Error("No se pudo actualizar la contraseña en Firebase Auth");
+      }
+
+      await tokenRef.delete();
+
       return res.status(200).json({ message: "Contraseña actualizada correctamente" });
     } catch (error: any) {
       const message: string = error?.message ?? "Error al restablecer la contraseña";
       const isClientError =
         message.includes("Token") ||
-        message.includes("contraseña");
+        message.includes("contraseña") ||
+        message.includes("permitidos");
 
       return res.status(isClientError ? 400 : 500).json({ error: message });
     }
