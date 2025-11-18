@@ -9,7 +9,7 @@ router.post("/register", UserController.registerUser);
 
 router.put("/update",UserController.updateUser);
 
-router.delete("/delete",UserController.deleteUser);
+router.delete("/delete/:id",UserController.deleteUser);
 
 router.post("/userExist",UserController.registerWithProvider);
 
