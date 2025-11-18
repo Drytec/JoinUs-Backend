@@ -2,12 +2,34 @@ import sgMail from '@sendgrid/mail';
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY as string);
 
+/**
+ * Response object returned after attempting to send an email
+ * @interface EmailResponse
+ * @property {boolean} success - Indicates whether the email was sent successfully
+ * @property {string} [messageId] - SendGrid message ID if email was sent successfully
+ * @property {string} [error] - Error message if email sending failed
+ */
 interface EmailResponse {
   success: boolean;
   messageId?: string;
   error?: string;
 }
 
+/**
+ * Sends a password reset email to the specified user via SendGrid
+ * Creates a styled HTML email with a reset link that expires in 1 hour
+ * @async
+ * @param {string} email - Recipient's email address
+ * @param {string} resetToken - Unique token for password reset verification
+ * @returns {Promise<EmailResponse>} Object containing success status, message ID, or error details
+ * @example
+ * const result = await sendPasswordResetEmail('user@example.com', 'abc123token');
+ * if (result.success) {
+ *   console.log('Email sent with ID:', result.messageId);
+ * } else {
+ *   console.error('Email failed:', result.error);
+ * }
+ */
 const sendPasswordResetEmail = async (email: string, resetToken: string): Promise<EmailResponse> => {
   const baseUrl = process.env.FRONTEND_URL ?? "";
   const trimmedBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;

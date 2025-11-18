@@ -6,7 +6,18 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 import { sendPasswordResetEmail } from "../services/passwordReset";
 
+/**
+ * Controller class that handles user-related HTTP requests
+ * @class UserController
+ */
 export class UserController {
+  /**
+   * Retrieves all users from the database
+   * @async
+   * @param {Request} req - Express request object
+   * @param {Response} res - Express response object
+   * @returns {Promise<Response>} JSON response with users array or error message
+   */
   static async getAllUsers(req: Request, res: Response) {
     try {
       const users = await UserService.getAll();
@@ -17,6 +28,13 @@ export class UserController {
     }
   }
 
+  /**
+   * Retrieves a specific user by their ID
+   * @async
+   * @param {Request} req - Express request object containing user ID in params
+   * @param {Response} res - Express response object
+   * @returns {Promise<Response>} JSON response with user data or error message
+   */
   static async getUserById(req: Request, res: Response) {
     try {
       const user = await UserService.getUserById(req.params.id);
@@ -27,6 +45,19 @@ export class UserController {
     }
   }
 
+  /**
+   * Registers a new user with email and password authentication
+   * Validates email format, name fields, age, and password strength
+   * @async
+   * @param {Request} req - Express request object with user registration data in body
+   * @param {Request} req.body.email - User's email address
+   * @param {Request} req.body.firstName - User's first name
+   * @param {Request} req.body.lastName - User's last name
+   * @param {Request} req.body.age - User's age (0-120)
+   * @param {Request} req.body.password - User's password (min 8 chars, must contain letter and number)
+   * @param {Response} res - Express response object
+   * @returns {Promise<Response>} JSON response with success message and user data (without password) or error
+   */
   static async registerUser(req: Request, res: Response) {
     try {
       const { email, firstName, lastName, age, password } = req.body;
@@ -80,56 +111,87 @@ export class UserController {
     }
   }
 
+  /**
+   * Handles registration with OAuth provider (e.g., Google)
+   * Verifies the provider token and checks if user already exists
+   * @async
+   * @param {Request} req - Express request object
+   * @param {Request} req.body.token - Firebase ID token from OAuth provider
+   * @param {Response} res - Express response object
+   * @returns {Promise<Response>} JSON response indicating if user exists with their data or provider data for registration
+   */
   static async registerWithProvider(req: Request, res: Response) {
-  try {
-    const { token } = req.body;
+    try {
+      const { token } = req.body;
 
-    if (!token) {
-      return res.status(400).json({ error: "Token no recibido" });
+      if (!token) {
+        return res.status(400).json({ error: "Token no recibido" });
+      }
+
+      const decoded = await admin.auth().verifyIdToken(token);
+
+      const uid = decoded.uid;
+      const email = decoded.email;
+      const name = decoded.name || decoded.displayName;
+      const picture = decoded.picture || decoded.photoURL;
+      
+      const userExists = await UserService.getUserByEmail(email);
+      console.log("EMAIL EN GETUSERBYEMAIL:", email);
+
+      if (userExists) {
+        return res.status(200).json({ exists: true, user: userExists });
+      }
+
+      return res.status(200).json({ exists: false, googleData: { uid, email, name, picture } });
+
+    } catch (err: any) {
+      console.log(err)
+      return res.status(500).json({ error: err.message });
     }
+  }
 
-    const decoded = await admin.auth().verifyIdToken(token);
+  /**
+   * Completes the registration process for OAuth provider users
+   * Adds additional user information (firstName, lastName, age) to existing OAuth account
+   * @async
+   * @param {Request} req - Express request object
+   * @param {Request} req.body.email - User's email from OAuth provider
+   * @param {Request} req.body.firstName - User's first name
+   * @param {Request} req.body.lastName - User's last name
+   * @param {Request} req.body.age - User's age
+   * @param {Response} res - Express response object
+   * @returns {Promise<Response>} JSON response with success message and user data or error
+   */
+  static async completeRegistration(req: Request, res: Response) {
+    try {
+      const decoded = req.body;
+      const { firstName, lastName, age } = req.body;
 
-    const uid = decoded.uid;
-    const email = decoded.email;
-    const name = decoded.name || decoded.displayName;
-    const picture = decoded.picture || decoded.photoURL;
-    
-    const userExists = await UserService.getUserByEmail(email);
-    console.log("EMAIL EN GETUSERBYEMAIL:", email);
+      const userExists = await UserService.getUserByEmail(decoded.email);
+      if (userExists) return res.status(400).json({ error: "El usuario ya está registrado" });
 
-    if (userExists) {
-      return res.status(200).json({ exists: true, user: userExists });
+      const newUser = await UserService.createUser({
+        email: decoded.email,
+        firstName,
+        lastName,
+        age,
+      });
+      return res.status(201).json({ message: "Registro completado", user: newUser });
+
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
     }
-
-    return res.status(200).json({ exists: false, googleData: { uid, email, name, picture } });
-
-  } catch (err: any) {
-    console.log(err)
-    return res.status(500).json({ error: err.message });
   }
-}
-static async completeRegistration(req: Request, res: Response) {
-  try {
-    const decoded = req.body;
-    const { firstName, lastName, age } = req.body;
 
-    const userExists = await UserService.getUserByEmail(decoded.email);
-    if (userExists) return res.status(400).json({ error: "El usuario ya está registrado" });
-
-    const newUser = await UserService.createUser({
-      email: decoded.email,
-      firstName,
-      lastName,
-      age,
-    });
-    return res.status(201).json({ message: "Registro completado", user: newUser });
-
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
-}
-
+  /**
+   * Updates an existing user's information
+   * @async
+   * @param {Request} req - Express request object
+   * @param {Request} req.params.id - User ID to update
+   * @param {Request} req.body - Updated user data
+   * @param {Response} res - Express response object
+   * @returns {Promise<Response>} JSON response with success message or error
+   */
   static async updateUser(req: Request, res: Response) {
     try {
       await UserService.updateUser(req.params.id, req.body);
@@ -139,6 +201,15 @@ static async completeRegistration(req: Request, res: Response) {
     }
   }
 
+  /**
+   * Deletes a user from both the database and Firebase Authentication
+   * @async
+   * @param {Request} req - Express request object
+   * @param {Request} req.params.id - User ID to delete
+   * @param {Request} req.body.uid - Firebase Authentication UID
+   * @param {Response} res - Express response object
+   * @returns {Promise<Response>} JSON response with success message or error
+   */
   static async deleteUser(req: Request, res: Response) {
     try {
       await UserService.deleteUser(req.params.id);
@@ -151,7 +222,14 @@ static async completeRegistration(req: Request, res: Response) {
   }
 
   /**
-   * Maneja la solicitud de restablecimiento sin revelar si el correo existe.
+   * Handles password reset request by sending a reset email
+   * Does not reveal whether the email exists in the system (security measure)
+   * Generates a secure token and stores it with a 1-hour expiration
+   * @async
+   * @param {Request} req - Express request object
+   * @param {Request} req.body.email - Email address to send password reset instructions
+   * @param {Response} res - Express response object
+   * @returns {Promise<Response>} JSON response with generic success message or error
    */
   static async forgotPassword(req: Request, res: Response) {
     const { email } = req.body;
@@ -160,7 +238,7 @@ static async completeRegistration(req: Request, res: Response) {
       return res.status(400).json({ error: "Email inválido" });
     }
 
-  const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = email.trim().toLowerCase();
 
     try {
       const user = await UserService.getUserByEmailP(normalizedEmail);
@@ -203,7 +281,14 @@ static async completeRegistration(req: Request, res: Response) {
   }
 
   /**
-   * Permite definir una nueva contraseña a partir de un token válido.
+   * Resets user password using a valid token
+   * Validates the token, checks expiration, and updates password in both database and Firebase Auth
+   * @async
+   * @param {Request} req - Express request object
+   * @param {Request} req.body.token - Password reset token from email
+   * @param {Request} req.body.password - New password (min 8 chars, must contain letter and number)
+   * @param {Response} res - Express response object
+   * @returns {Promise<Response>} JSON response with success message or error
    */
   static async resetPassword(req: Request, res: Response) {
     const { token, password } = req.body;
