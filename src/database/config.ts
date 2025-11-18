@@ -5,6 +5,7 @@ import "dotenv/config";
 const initializeFirebase = () => {
   if (!admin.apps.length) {
     try {
+      console.log("[FIREBASE] Initializing Firebase Admin SDK...");
       console.log("[FIREBASE] Checking for FIREBASE_SERVICE_ACCOUNT_BASE64...", !!process.env.FIREBASE_SERVICE_ACCOUNT_BASE64);
       
       // Try to use service account JSON if available (for production)
