@@ -5,6 +5,7 @@ import { admin, db } from "../database/config";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import { sendPasswordResetEmail } from "../services/passwordReset";
+import { generateToken } from "../services/jwt";
 
 export class UserController {
   static async getAllUsers(req: Request, res: Response) {
@@ -74,7 +75,19 @@ export class UserController {
       await UserService.createUser(newUserData);
       const { password: _, ...userWithoutPassword } = newUserData;
 
-      return res.status(201).json({ message: "Registro Exitoso", user: userWithoutPassword });
+      // Generate JWT token
+      const token = generateToken({
+        uid: userRecord.uid,
+        email,
+        firstName,
+        lastName
+      });
+
+      return res.status(201).json({ 
+        message: "Registro Exitoso", 
+        user: { ...userWithoutPassword, hasPassword: true },
+        token 
+      });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
@@ -95,11 +108,33 @@ export class UserController {
     const name = decoded.name || decoded.displayName;
     const picture = decoded.picture || decoded.photoURL;
     
-    const userExists = await UserService.getUserByEmail(email);
-    console.log("EMAIL EN GETUSERBYEMAIL:", email);
+    // Check by email first, then by uid
+    let userExists = await UserService.getUserByEmail(email);
+    
+    if (!userExists) {
+      userExists = await UserService.getUserByUid(uid);
+    }
+    
+    console.log("Checking user - Email:", email, "UID:", uid, "Found:", !!userExists);
 
     if (userExists) {
-      return res.status(200).json({ exists: true, user: userExists });
+      // Generate JWT token for existing user
+      const jwtToken = generateToken({
+        uid: userExists.uid || uid,
+        email: userExists.email,
+        firstName: userExists.firstName,
+        lastName: userExists.lastName
+      });
+
+      // Get full user data with password field to check if it exists
+      const fullUserData = await UserService.getUserByEmailP(email);
+      const hasPassword = !!(fullUserData && fullUserData.password);
+
+      return res.status(200).json({ 
+        exists: true, 
+        user: { ...userExists, hasPassword },
+        token: jwtToken 
+      });
     }
 
     return res.status(200).json({ exists: false, googleData: { uid, email, name, picture } });
@@ -112,7 +147,7 @@ export class UserController {
 static async completeRegistration(req: Request, res: Response) {
   try {
     const decoded = req.body;
-    const { firstName, lastName, age } = req.body;
+    const { firstName, lastName, age, uid } = req.body;
 
     const userExists = await UserService.getUserByEmail(decoded.email);
     if (userExists) return res.status(400).json({ error: "El usuario ya está registrado" });
@@ -122,8 +157,22 @@ static async completeRegistration(req: Request, res: Response) {
       firstName,
       lastName,
       age,
+      uid
     });
-    return res.status(201).json({ message: "Registro completado", user: newUser });
+
+    // Generate JWT token
+    const token = generateToken({
+      uid: uid || newUser.uid,
+      email: decoded.email,
+      firstName,
+      lastName
+    });
+
+    return res.status(201).json({ 
+      message: "Registro completado", 
+      user: { ...newUser, hasPassword: false },
+      token 
+    });
 
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -132,21 +181,257 @@ static async completeRegistration(req: Request, res: Response) {
 
   static async updateUser(req: Request, res: Response) {
     try {
-      await UserService.updateUser(req.params.id, req.body);
-      return res.status(200).json({ message: "Usuario actualizado" });
-    } catch (error) {
-      return res.status(500).json({ error: "Error al actualizar usuario" });
+      const { uid, password, email, currentPassword, ...updateData } = req.body;
+      
+      console.log("Update request received for uid:", uid, "email:", email);
+      console.log("Update data (without uid, password, email, currentPassword):", updateData);
+      
+      if (!uid && !email) {
+        return res.status(400).json({ error: "UID o email es requerido" });
+      }
+
+      // Find user by uid first, then by email as fallback (only to get document ID)
+      let userDoc = await UserService.getUserByUid(uid);
+      
+      if (!userDoc && email) {
+        console.log("User not found by uid, trying by email:", email);
+        userDoc = await UserService.getUserByEmail(email);
+      }
+      
+      if (!userDoc || !userDoc.id) {
+        console.error("User not found for uid:", uid, "email:", email);
+        return res.status(404).json({ error: "Usuario no encontrado. Por favor, completa tu registro primero." });
+      }
+
+      console.log("Found user document ID:", userDoc.id);
+
+      // Verify current password only for non-OAuth users
+      const bcrypt = require('bcrypt');
+      const userWithPassword = await UserService.getUserByEmailP(email);
+      
+      if (!userWithPassword || !userWithPassword.password) {
+        // OAuth user without password - skip password verification
+        console.log("OAuth user detected, skipping password verification");
+      } else {
+        // User has password, verify it
+        if (!currentPassword) {
+          return res.status(400).json({ error: "La contraseña actual es requerida" });
+        }
+        const passwordMatches = await bcrypt.compare(currentPassword, userWithPassword.password);
+        if (!passwordMatches) {
+          return res.status(401).json({ error: "Contraseña actual incorrecta" });
+        }
+      }
+
+      // Update the uid in the database if it doesn't match
+      if (uid && userDoc.uid !== uid) {
+        console.log("Updating uid in database from", userDoc.uid, "to", uid);
+        updateData.uid = uid;
+      }
+
+      // If password is provided, hash it
+      if (password) {
+        const bcrypt = require('bcrypt');
+        const hashedPassword = await bcrypt.hash(password, 10);
+        updateData.password = hashedPassword;
+        
+        // Also update password in Firebase Auth if user has a uid
+        if (uid) {
+          try {
+            await admin.auth().updateUser(uid, { password });
+          } catch (firebaseError) {
+            console.error("Error updating Firebase password:", firebaseError);
+            // Continue even if Firebase update fails (user might be OAuth only)
+          }
+        }
+      }
+
+      // Update in Firestore
+      await UserService.updateUser(userDoc.id, updateData);
+      console.log("User updated successfully in Firestore");
+      
+      // Return the updated data to frontend
+      return res.status(200).json({ 
+        message: "Usuario actualizado",
+        user: {
+          uid,
+          email,
+          firstName: updateData.firstName,
+          lastName: updateData.lastName,
+          age: updateData.age
+        }
+      });
+    } catch (error: any) {
+      console.error("Error in updateUser:", error);
+      return res.status(500).json({ error: error.message || "Error al actualizar usuario" });
+    }
+  }
+
+  static async changePassword(req: Request, res: Response) {
+    try {
+      const { uid, email, currentPassword, newPassword } = req.body;
+
+      // Validate required fields
+      if (!uid || !email || !currentPassword || !newPassword) {
+        return res.status(400).json({ error: "Faltan campos requeridos" });
+      }
+
+      // Validate new password strength
+      if (newPassword.length < 8) {
+        return res.status(400).json({ error: "La nueva contraseña debe tener al menos 8 caracteres" });
+      }
+
+      if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(newPassword)) {
+        return res.status(400).json({ error: "La contraseña debe contener mayúsculas, minúsculas y números" });
+      }
+
+      // Get user document directly from Firestore
+      const userSnapshot = await db.collection("users").where("uid", "==", uid).get();
+      
+      if (userSnapshot.empty) {
+        // Try to find by email
+        const usersByEmail = await db.collection("users").where("email", "==", email).get();
+        if (usersByEmail.empty) {
+          return res.status(404).json({ error: "Usuario no encontrado" });
+        }
+        const userData = usersByEmail.docs[0].data();
+        
+        // Check if user has a password
+        if (!userData.password) {
+          return res.status(400).json({ 
+            error: "Las cuentas de OAuth (Google/GitHub) no tienen contraseña para cambiar" 
+          });
+        }
+
+        // Verify current password
+        const isPasswordValid = await bcrypt.compare(currentPassword, userData.password);
+        if (!isPasswordValid) {
+          return res.status(401).json({ error: "Contraseña actual incorrecta" });
+        }
+
+        // Hash new password
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        // Update password in Firestore
+        await usersByEmail.docs[0].ref.update({
+          password: hashedPassword,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        // Update password in Firebase Auth
+        try {
+          await admin.auth().updateUser(uid, {
+            password: newPassword
+          });
+        } catch (authError: any) {
+          console.error("Error updating Firebase Auth password:", authError);
+        }
+
+        return res.status(200).json({ 
+          message: "Contraseña cambiada exitosamente" 
+        });
+      }
+
+      const userDoc = userSnapshot.docs[0];
+      const userData = userDoc.data();
+
+      // Check if user has a password (not OAuth-only account)
+      if (!userData.password) {
+        return res.status(400).json({ 
+          error: "Las cuentas de OAuth (Google/GitHub) no tienen contraseña para cambiar" 
+        });
+      }
+
+      // Verify current password
+      const isPasswordValid = await bcrypt.compare(currentPassword, userData.password);
+      if (!isPasswordValid) {
+        return res.status(401).json({ error: "Contraseña actual incorrecta" });
+      }
+
+      // Hash new password
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+      // Update password in Firestore
+      await userDoc.ref.update({
+        password: hashedPassword,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      // Update password in Firebase Auth
+      try {
+        await admin.auth().updateUser(uid, {
+          password: newPassword
+        });
+      } catch (authError: any) {
+        console.error("Error updating Firebase Auth password:", authError);
+        // Continue even if Firebase Auth update fails (user might be OAuth-only)
+      }
+
+      return res.status(200).json({ 
+        message: "Contraseña cambiada exitosamente" 
+      });
+    } catch (error: any) {
+      console.error("Error in changePassword:", error);
+      return res.status(500).json({ error: error.message || "Error al cambiar la contraseña" });
     }
   }
 
   static async deleteUser(req: Request, res: Response) {
     try {
-      await UserService.deleteUser(req.params.id);
-      const { uid } = req.body;
-      await AuthService.deleteCurrentUser(uid);
+      const uid = req.params.id; // This is the uid from URL
+      const { email, currentPassword } = req.body;
+      
+      console.log("Delete request received for uid:", uid);
+      
+      if (!uid) {
+        return res.status(400).json({ error: "UID es requerido" });
+      }
+
+      // Find user by uid
+      const user = await UserService.getUserByUid(uid);
+      
+      console.log("User found for deletion:", user);
+      
+      if (!user || !user.id) {
+        console.error("User not found for uid:", uid);
+        return res.status(404).json({ error: "Usuario no encontrado" });
+      }
+
+      // Verify password before deletion - only for non-OAuth users
+      const bcrypt = require('bcrypt');
+      const userWithPassword = await UserService.getUserByEmailP(email || user.email);
+      
+      if (!userWithPassword || !userWithPassword.password) {
+        // OAuth user without password - skip password verification
+        console.log("OAuth user detected for deletion, skipping password verification");
+      } else {
+        // User has password, verify it
+        if (!currentPassword) {
+          return res.status(400).json({ error: "La contraseña es requerida para eliminar la cuenta" });
+        }
+        const passwordMatches = await bcrypt.compare(currentPassword, userWithPassword.password);
+        if (!passwordMatches) {
+          return res.status(401).json({ error: "Contraseña incorrecta" });
+        }
+        console.log("Password verified successfully for deletion");
+      }
+
+      // Delete from Firestore
+      await UserService.deleteUser(user.id);
+      
+      // Delete from Firebase Auth
+      try {
+        await admin.auth().deleteUser(uid);
+        console.log("User deleted from Firebase Auth");
+      } catch (firebaseError) {
+        console.error("Error deleting from Firebase Auth:", firebaseError);
+        // Continue even if Firebase delete fails
+      }
+
       return res.status(200).json({ message: "Usuario eliminado" });
-    } catch (error) {
-      return res.status(500).json({ error: "Error al eliminar usuario" });
+    } catch (error: any) {
+      console.error("Error in deleteUser:", error);
+      return res.status(500).json({ error: error.message || "Error al eliminar usuario" });
     }
   }
 

@@ -35,6 +35,26 @@ export class UserService {
     return { id: userDoc.id, ...userDoc.data() } as User;
   }
 
+  static async getUserByUid(uid: string): Promise<User | null> {
+    console.log("Searching for user with uid:", uid);
+    const snapshot = await usersCollection.where("uid", "==", uid).get();
+
+    console.log("Snapshot empty?", snapshot.empty);
+    console.log("Snapshot size:", snapshot.size);
+
+    if (snapshot.empty) return null;
+
+    const userDoc = snapshot.docs[0];
+    const data = userDoc.data();
+    console.log("User document data:", data);
+    
+    const { password, ...userData } = data;
+    const result = { id: userDoc.id, ...userData } as User;
+    console.log("Returning user:", result);
+    
+    return result;
+  }
+
   static async createUser(user: User): Promise<string> {
     const docRef = await usersCollection.add(user);
     return docRef.id;
