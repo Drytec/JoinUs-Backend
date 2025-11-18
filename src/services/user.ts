@@ -16,7 +16,7 @@ export class UserService {
     return snap.exists ? ({ id: snap.id, ...snap.data() } as User) : null;
   }
 
-  static async getUserByEmail(email: string): Promise<User | null> {
+  static async getUserByEmail(email: string|undefined): Promise<User | null> {
     const snapshot = await usersCollection.where("email", "==", email).get();
 
     if (snapshot.empty) return null;

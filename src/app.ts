@@ -17,7 +17,28 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use("/api/users", userRoutes);
+import admin from "firebase-admin";
+import { error } from "console";
 
+app.router.get("/fi", (req, res) => {
+  try {
+    const app = admin.app();
+    console.log("ENV PROJECT_ID:", process.env.FIREBASE_PROJECT_ID);
+console.log("ENV CLIENT_EMAIL:", process.env.FIREBASE_CLIENT_EMAIL);
+console.log("ENV PRIVATE_KEY_EMPTY?:", process.env.FIREBASE_PRIVATE_KEY ? "NO" : "YES");
+    res.json({
+  
+      message: "Firebase Admin conectado correctamente",
+      projectId: app.options.projectId,
+      
+    });
+
+  } catch (err) {
+    res.status(500).json({
+      error: err instanceof Error ? err.message : String(err)
+    });
+  }
+});
 app.get("/", (_req: Request, res: Response) => {
   res.send("Backend API is running 🚀");
 });

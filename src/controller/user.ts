@@ -1,7 +1,10 @@
 import { Request, Response } from "express";
 import { UserService } from "../services/user";
 import { AuthService } from "../services/auth";
+import { admin, db } from "../database/config";
 import bcrypt from "bcrypt";
+import crypto from "crypto";
+import { sendPasswordResetEmail } from "../services/passwordReset";
 
 export class UserController {
   static async getAllUsers(req: Request, res: Response) {
@@ -77,7 +80,56 @@ export class UserController {
     }
   }
 
-  
+  static async registerWithProvider(req: Request, res: Response) {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({ error: "Token no recibido" });
+    }
+
+    const decoded = await admin.auth().verifyIdToken(token);
+
+    const uid = decoded.uid;
+    const email = decoded.email;
+    const name = decoded.name || decoded.displayName;
+    const picture = decoded.picture || decoded.photoURL;
+    
+    const userExists = await UserService.getUserByEmail(email);
+    console.log("EMAIL EN GETUSERBYEMAIL:", email);
+
+    if (userExists) {
+      return res.status(200).json({ exists: true, user: userExists });
+    }
+
+    return res.status(200).json({ exists: false, googleData: { uid, email, name, picture } });
+
+  } catch (err: any) {
+    console.log(err)
+    return res.status(500).json({ error: err.message });
+  }
+}
+static async completeRegistration(req: Request, res: Response) {
+  try {
+    const decoded = req.body;
+    const { firstName, lastName, age } = req.body;
+
+    const userExists = await UserService.getUserByEmail(decoded.email);
+    if (userExists) return res.status(400).json({ error: "El usuario ya está registrado" });
+
+    const newUser = await UserService.createUser({
+      email: decoded.email,
+      firstName,
+      lastName,
+      age,
+    });
+    return res.status(201).json({ message: "Registro completado", user: newUser });
+
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+}
+
   static async updateUser(req: Request, res: Response) {
     try {
       await UserService.updateUser(req.params.id, req.body);
@@ -95,6 +147,137 @@ export class UserController {
       return res.status(200).json({ message: "Usuario eliminado" });
     } catch (error) {
       return res.status(500).json({ error: "Error al eliminar usuario" });
+    }
+  }
+
+  /**
+   * Maneja la solicitud de restablecimiento sin revelar si el correo existe.
+   */
+  static async forgotPassword(req: Request, res: Response) {
+    const { email } = req.body;
+
+    if (typeof email !== "string" || email.trim().length === 0) {
+      return res.status(400).json({ error: "Email inválido" });
+    }
+
+  const normalizedEmail = email.trim().toLowerCase();
+
+    try {
+      const user = await UserService.getUserByEmailP(normalizedEmail);
+
+      if (!user || !user.id) {
+        return res.status(200).json({ message: "Si el correo existe, recibirás instrucciones en breve" });
+      }
+
+      const tokensCollection = db.collection("password_reset_tokens");
+      const existingTokens = await tokensCollection.where("email", "==", normalizedEmail).get();
+
+      for (const docSnapshot of existingTokens.docs) {
+        await docSnapshot.ref.delete();
+      }
+
+      const token = crypto.randomBytes(32).toString("hex");
+      const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+      const tokenRef = tokensCollection.doc(tokenHash);
+      const expiresAt = admin.firestore.Timestamp.fromMillis(Date.now() + 60 * 60 * 1000);
+
+      await tokenRef.set({
+        email: normalizedEmail,
+        userId: user.id,
+        uid: (user as unknown as { uid?: string }).uid ?? null,
+        expiresAt,
+        createdAt: admin.firestore.Timestamp.now(),
+      });
+
+      const emailResult = await sendPasswordResetEmail(normalizedEmail, token);
+
+      if (!emailResult.success) {
+        await tokenRef.delete();
+        throw new Error(emailResult.error ?? "No se pudo enviar el correo de recuperación");
+      }
+
+      return res.status(200).json({ message: "Si el correo existe, recibirás instrucciones en breve" });
+    } catch (error: any) {
+      return res.status(500).json({ error: error.message ?? "Error al procesar la solicitud" });
+    }
+  }
+
+  /**
+   * Permite definir una nueva contraseña a partir de un token válido.
+   */
+  static async resetPassword(req: Request, res: Response) {
+    const { token, password } = req.body;
+
+    if (typeof token !== "string" || token.trim().length === 0) {
+      return res.status(400).json({ error: "Token inválido" });
+    }
+
+    if (typeof password !== "string" || password.trim().length === 0) {
+      return res.status(400).json({ error: "Contraseña inválida" });
+    }
+
+    const normalizedToken = token.trim();
+    const newPassword = password.trim();
+
+    try {
+      const tokensCollection = db.collection("password_reset_tokens");
+      const tokenHash = crypto.createHash("sha256").update(normalizedToken).digest("hex");
+      const tokenRef = tokensCollection.doc(tokenHash);
+      const tokenSnapshot = await tokenRef.get();
+
+      if (!tokenSnapshot.exists) {
+        return res.status(400).json({ error: "Token inválido o expirado" });
+      }
+
+      const data = tokenSnapshot.data() as
+        | {
+            email: string;
+            userId: string;
+            uid?: string | null;
+            expiresAt: admin.firestore.Timestamp;
+          }
+        | undefined;
+
+      if (!data) {
+        await tokenRef.delete();
+        return res.status(400).json({ error: "Token inválido" });
+      }
+
+      if (data.expiresAt.toMillis() < Date.now()) {
+        await tokenRef.delete();
+        return res.status(400).json({ error: "Token expirado" });
+      }
+
+      if (newPassword.length < 8) {
+        return res.status(400).json({ error: "La contraseña debe tener al menos 8 caracteres" });
+      }
+
+      if (!/(?=.*[a-zA-Z])(?=.*\d)/.test(newPassword)) {
+        return res.status(400).json({ error: "La contraseña debe contener al menos una letra y un número" });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await UserService.updateUser(data.userId, { password: hashedPassword });
+
+      try {
+        const userUid = data.uid ?? (await admin.auth().getUserByEmail(data.email)).uid;
+        await admin.auth().updateUser(userUid, { password: newPassword });
+      } catch (authError) {
+        console.error("No se pudo actualizar la contraseña en Firebase Auth:", authError);
+        throw new Error("No se pudo actualizar la contraseña en Firebase Auth");
+      }
+
+      await tokenRef.delete();
+
+      return res.status(200).json({ message: "Contraseña actualizada correctamente" });
+    } catch (error: any) {
+      const message: string = error?.message ?? "Error al restablecer la contraseña";
+      const isClientError =
+        message.includes("Token") ||
+        message.includes("contraseña") ||
+        message.includes("permitidos");
+
+      return res.status(isClientError ? 400 : 500).json({ error: message });
     }
   }
 }
