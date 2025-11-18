@@ -13,26 +13,35 @@ if (!process.env.PORT) {
 const PORT: number = parseInt(process.env.PORT as string, 10);
 
 app.use(helmet());
-app.use(cors({
-  origin: (origin, callback) => {
+
+// CORS configuration - Allow all Vercel deployments
+const corsOptions = {
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    // Allow requests with no origin (mobile apps, Postman, etc.)
+    if (!origin) {
+      return callback(null, true);
+    }
+    
     const allowedOrigins = [
       'http://localhost:5173',
       'http://localhost:5100',
-      'https://join-us-frontend.vercel.app',
-      process.env.FRONTEND_URL
+      'https://join-us-frontend.vercel.app'
     ];
     
-    // Allow Vercel preview deployments
-    if (!origin || allowedOrigins.includes(origin) || origin?.includes('vercel.app')) {
+    // Allow if origin is in the list OR contains 'vercel.app'
+    if (allowedOrigins.includes(origin) || origin.includes('vercel.app')) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      callback(null, false);
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use("/api/users", userRoutes);
