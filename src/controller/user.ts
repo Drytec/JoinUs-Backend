@@ -30,6 +30,8 @@ export class UserController {
 
   static async registerUser(req: Request, res: Response) {
     try {
+      console.log("[REGISTER] Request body:", { ...req.body, password: '***' });
+      
       const { email, firstName, lastName, age, password } = req.body;
       const pass = await UserService.getUserByEmail(email);
       if (pass !== null) return res.status(400).json({ error: "Usuario ya existe" });
@@ -55,13 +57,17 @@ export class UserController {
       if (hasForbiddenPattern) return res.status(400).json({ error: "La contraseña contiene caracteres o patrones no permitidos" });
       if (!/(?=.*[a-zA-Z])(?=.*\d)/.test(passwordStr)) return res.status(400).json({ error: "La contraseña debe contener al menos una letra y un número" });
 
+      console.log("[REGISTER] Hashing password...");
       const saltRounds = 10;
       const hashedPassword = await bcrypt.hash(password, saltRounds);
 
+      console.log("[REGISTER] Checking if email exists...");
       const existing = await UserService.getUserByEmail(email);
       if (existing) return res.status(409).json({ error: "El email ya está registrado" });
 
+      console.log("[REGISTER] Creating user in Firebase Auth...");
       const userRecord = await AuthService.register(email, password);
+      console.log("[REGISTER] User created in Firebase Auth:", userRecord.uid);
 
       const newUserData = {
         uid: userRecord.uid,
@@ -72,7 +78,10 @@ export class UserController {
         password: hashedPassword
       };
 
+      console.log("[REGISTER] Saving user to Firestore...");
       await UserService.createUser(newUserData);
+      console.log("[REGISTER] User saved to Firestore");
+      
       const { password: _, ...userWithoutPassword } = newUserData;
 
       // Generate JWT token
@@ -83,13 +92,15 @@ export class UserController {
         lastName
       });
 
+      console.log("[REGISTER] Registration successful for:", email);
       return res.status(201).json({ 
         message: "Registro Exitoso", 
         user: { ...userWithoutPassword, hasPassword: true },
         token 
       });
     } catch (err: any) {
-      return res.status(500).json({ error: err.message });
+      console.error("[REGISTER ERROR]", err);
+      return res.status(500).json({ error: err.message || "Error al crear la cuenta" });
     }
   }
 
