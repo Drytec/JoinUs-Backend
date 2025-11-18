@@ -14,7 +14,21 @@ const PORT: number = parseInt(process.env.PORT as string, 10);
 
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: (origin, callback) => {
+    const allowedOrigins = [
+      'http://localhost:5173',
+      'http://localhost:5100',
+      'https://join-us-frontend.vercel.app',
+      process.env.FRONTEND_URL
+    ];
+    
+    // Allow Vercel preview deployments
+    if (!origin || allowedOrigins.includes(origin) || origin?.includes('vercel.app')) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
