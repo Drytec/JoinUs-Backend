@@ -1,29 +1,22 @@
-import { auth } from "../database/config";
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signOut,
-  UserCredential,
-  deleteUser
-} from "firebase/auth";
+import admin from "firebase-admin";
 
 export class AuthService {
-  static async register(email: string, password: string): Promise<UserCredential> {
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    return userCredential;
+  static async register(email: string, password: string) {
+   try {
+    const userRecord = await admin.auth().createUser({ email, password });
+    return userRecord;
+  } catch (error: any) {
+ 
+    throw new Error(error.message || "Error en Firebase Auth");
   }
-    static async deleteCurrentUser(): Promise<void> {
-    const user = auth.currentUser;
-    if (!user) throw new Error("No hay usuario autenticado");
+  }
 
-    await deleteUser(user);
+
+  static async deleteCurrentUser(uid: string) {
+    try {
+      await admin.auth().deleteUser(uid);
+    } catch (error: any) {
+      throw new Error(error.message || "Error al eliminar usuario");
     }
-  static async login(email: string, password: string): Promise<UserCredential> {
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    return userCredential;
-  }
-
-  static async logout(): Promise<void> {
-    await signOut(auth);
   }
 }
