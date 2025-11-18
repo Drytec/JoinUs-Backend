@@ -5,8 +5,11 @@ import "dotenv/config";
 const initializeFirebase = () => {
   if (!admin.apps.length) {
     try {
+      console.log("[FIREBASE] Checking for FIREBASE_SERVICE_ACCOUNT_BASE64...", !!process.env.FIREBASE_SERVICE_ACCOUNT_BASE64);
+      
       // Try to use service account JSON if available (for production)
       if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
+        console.log("[FIREBASE] Using Base64 service account");
         const serviceAccount = JSON.parse(
           Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64, 'base64').toString('utf-8')
         );
@@ -19,6 +22,7 @@ const initializeFirebase = () => {
         return;
       }
       
+      console.log("[FIREBASE] Base64 not found, trying individual env vars");
       // Fallback to individual environment variables
       let privateKey = process.env.FIREBASE_PRIVATE_KEY;
       
