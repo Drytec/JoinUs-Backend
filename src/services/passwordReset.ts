@@ -17,7 +17,7 @@ const sendPasswordResetEmail = async (email: string, resetToken: string): Promis
     to: email,
     from: {
       email: process.env.EMAIL_SENDER as string,
-      name: "JoinUs Support"
+      name: process.env.EMAIL_SENDER_NAME || "JoinUs Support"
     },
     subject: "Reestablece tu contraseña de JoinUs",
     html: `<!DOCTYPE html>

@@ -127,7 +127,7 @@ export class UserController {
       });
 
       // Get full user data with password field to check if it exists
-      const fullUserData = await UserService.getUserByEmailP(email);
+      const fullUserData = email ? await UserService.getUserByEmailP(email) : null;
       const hasPassword = !!(fullUserData && fullUserData.password);
 
       return res.status(200).json({ 
@@ -152,7 +152,7 @@ static async completeRegistration(req: Request, res: Response) {
     const userExists = await UserService.getUserByEmail(decoded.email);
     if (userExists) return res.status(400).json({ error: "El usuario ya está registrado" });
 
-    const newUser = await UserService.createUser({
+    await UserService.createUser({
       email: decoded.email,
       firstName,
       lastName,
@@ -162,7 +162,7 @@ static async completeRegistration(req: Request, res: Response) {
 
     // Generate JWT token
     const token = generateToken({
-      uid: uid || newUser.uid,
+      uid: uid,
       email: decoded.email,
       firstName,
       lastName
@@ -170,7 +170,14 @@ static async completeRegistration(req: Request, res: Response) {
 
     return res.status(201).json({ 
       message: "Registro completado", 
-      user: { ...newUser, hasPassword: false },
+      user: {
+        uid,
+        email: decoded.email,
+        firstName,
+        lastName,
+        age,
+        hasPassword: false
+      },
       token 
     });
 
