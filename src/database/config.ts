@@ -4,24 +4,37 @@ import "dotenv/config";
 // Initialize Firebase Admin SDK
 const initializeFirebase = () => {
   if (!admin.apps.length) {
-    // Handle private key - replace literal \n with actual newlines
-    let privateKey = process.env.FIREBASE_PRIVATE_KEY;
-    
-    if (!process.env.FIREBASE_PROJECT_ID || !privateKey || !process.env.FIREBASE_CLIENT_EMAIL) {
-      console.error("[ERROR] Firebase credentials are missing in .env file");
-      console.error("[ERROR] FIREBASE_PROJECT_ID:", !!process.env.FIREBASE_PROJECT_ID);
-      console.error("[ERROR] FIREBASE_PRIVATE_KEY:", !!privateKey);
-      console.error("[ERROR] FIREBASE_CLIENT_EMAIL:", !!process.env.FIREBASE_CLIENT_EMAIL);
-      throw new Error("Missing Firebase configuration");
-    }
-
-    // Replace escaped newlines with actual newlines
-    // This handles both \n in .env file and actual newlines from Render
-    if (privateKey.includes('\\n')) {
-      privateKey = privateKey.replace(/\\n/g, '\n');
-    }
-
     try {
+      // Try to use service account JSON if available (for production)
+      if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
+        const serviceAccount = JSON.parse(
+          Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64, 'base64').toString('utf-8')
+        );
+        
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+        });
+        
+        console.log("[FIREBASE] Admin SDK initialized with service account JSON");
+        return;
+      }
+      
+      // Fallback to individual environment variables
+      let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+      
+      if (!process.env.FIREBASE_PROJECT_ID || !privateKey || !process.env.FIREBASE_CLIENT_EMAIL) {
+        console.error("[ERROR] Firebase credentials are missing");
+        console.error("[ERROR] FIREBASE_PROJECT_ID:", !!process.env.FIREBASE_PROJECT_ID);
+        console.error("[ERROR] FIREBASE_PRIVATE_KEY:", !!privateKey);
+        console.error("[ERROR] FIREBASE_CLIENT_EMAIL:", !!process.env.FIREBASE_CLIENT_EMAIL);
+        throw new Error("Missing Firebase configuration");
+      }
+
+      // Replace escaped newlines with actual newlines
+      if (privateKey.includes('\\n')) {
+        privateKey = privateKey.replace(/\\n/g, '\n');
+      }
+
       admin.initializeApp({
         credential: admin.credential.cert({
           projectId: process.env.FIREBASE_PROJECT_ID,
