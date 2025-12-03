@@ -44,10 +44,19 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+/**
+ * User routes.
+ */
 app.use("/api/users", userRoutes);
 import admin from "firebase-admin";
 import { error } from "console";
 
+/**
+ * Route to check Firebase connection.
+ * @name get/fi
+ * @function
+ */
 app.get("/fi", (req, res) => {
   try {
     const app = admin.app();
@@ -67,6 +76,12 @@ console.log("ENV PRIVATE_KEY_EMPTY?:", process.env.FIREBASE_PRIVATE_KEY ? "NO" :
     });
   }
 });
+
+/**
+ * Root route to check if the server is running.
+ * @name get/
+ * @function
+ */
 app.get("/", (_req: Request, res: Response) => {
   res.send("Backend API is running 🚀");
 });

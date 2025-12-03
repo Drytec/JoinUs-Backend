@@ -7,7 +7,16 @@ import crypto from "crypto";
 import { sendPasswordResetEmail } from "../services/passwordReset";
 import { generateToken } from "../services/jwt";
 
+/**
+ * Controller class for handling user-related HTTP requests.
+ */
 export class UserController {
+  /**
+   * Retrieves all users.
+   * @param {Request} req - The express request object.
+   * @param {Response} res - The express response object.
+   * @returns {Promise<Response>} The response containing the list of users.
+   */
   static async getAllUsers(req: Request, res: Response) {
     try {
       const users = await UserService.getAll();
@@ -18,6 +27,12 @@ export class UserController {
     }
   }
 
+  /**
+   * Retrieves a user by their ID.
+   * @param {Request} req - The express request object.
+   * @param {Response} res - The express response object.
+   * @returns {Promise<Response>} The response containing the user data.
+   */
   static async getUserById(req: Request, res: Response) {
     try {
       const user = await UserService.getUserById(req.params.id);
@@ -28,6 +43,12 @@ export class UserController {
     }
   }
 
+  /**
+   * Registers a new user.
+   * @param {Request} req - The express request object containing user details.
+   * @param {Response} res - The express response object.
+   * @returns {Promise<Response>} The response indicating success or failure.
+   */
   static async registerUser(req: Request, res: Response) {
     try {
       console.log("[REGISTER] Request body:", { ...req.body, password: '***' });
@@ -104,6 +125,12 @@ export class UserController {
     }
   }
 
+  /**
+   * Checks if a user exists or registers them with a provider token.
+   * @param {Request} req - The express request object containing the provider token.
+   * @param {Response} res - The express response object.
+   * @returns {Promise<Response>} The response with user existence status and data.
+   */
   static async registerWithProvider(req: Request, res: Response) {
     try {
       const { token } = req.body;
@@ -155,6 +182,12 @@ export class UserController {
       return res.status(500).json({ error: err.message });
     }
   }
+  /**
+   * Completes the registration for a user signing up with a provider.
+   * @param {Request} req - The express request object containing user details.
+   * @param {Response} res - The express response object.
+   * @returns {Promise<Response>} The response indicating success.
+   */
   static async completeRegistration(req: Request, res: Response) {
     try {
       const decoded = req.body;
@@ -197,6 +230,12 @@ export class UserController {
     }
   }
 
+  /**
+   * Updates user information.
+   * @param {Request} req - The express request object containing update data.
+   * @param {Response} res - The express response object.
+   * @returns {Promise<Response>} The response indicating success.
+   */
   static async updateUser(req: Request, res: Response) {
     try {
       const { uid, password, email, currentPassword, ...updateData } = req.body;
@@ -285,6 +324,12 @@ export class UserController {
     }
   }
 
+  /**
+   * Changes the user's password.
+   * @param {Request} req - The express request object containing password details.
+   * @param {Response} res - The express response object.
+   * @returns {Promise<Response>} The response indicating success.
+   */
   static async changePassword(req: Request, res: Response) {
     try {
       const { uid, email, currentPassword, newPassword } = req.body;
@@ -394,6 +439,12 @@ export class UserController {
     }
   }
 
+  /**
+   * Deletes a user account.
+   * @param {Request} req - The express request object containing the user ID.
+   * @param {Response} res - The express response object.
+   * @returns {Promise<Response>} The response indicating success.
+   */
   static async deleteUser(req: Request, res: Response) {
     try {
       const uid = req.params.id; // This is the uid from URL
@@ -455,6 +506,9 @@ export class UserController {
 
   /**
    * Maneja la solicitud de restablecimiento sin revelar si el correo existe.
+   * @param {Request} req - The express request object containing the email.
+   * @param {Response} res - The express response object.
+   * @returns {Promise<Response>} The response indicating the request was processed.
    */
   static async forgotPassword(req: Request, res: Response) {
     const { email } = req.body;
@@ -507,6 +561,9 @@ export class UserController {
 
   /**
    * Permite definir una nueva contraseña a partir de un token válido.
+   * @param {Request} req - The express request object containing token and new password.
+   * @param {Response} res - The express response object.
+   * @returns {Promise<Response>} The response indicating success.
    */
   static async resetPassword(req: Request, res: Response) {
     const { token, password } = req.body;
